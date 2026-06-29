@@ -23,6 +23,18 @@ per-page watchdog + repetition flagging).  See that module's docstring.
 
 RESUME: a pdf whose .mmd already exists (size>0) is skipped.
 """
+
+import os as _os
+_SANITY_DIR = _os.path.dirname(_os.path.abspath(__file__))
+import sys as _sys
+_sys.path.insert(0, _SANITY_DIR)
+try:
+    from pdf_sanity import pdf_sanity
+except Exception:
+    pdf_sanity = None
+_SANITY_OFF = _os.environ.get("PDF_SANITY_OFF","") not in ("","0","false")
+_SANITY_RP = _os.environ.get("PDF_SANITY_RENDER_PROBE","") not in ("","0","false")
+
 import os, sys, json, time, glob, argparse, socket
 
 
@@ -94,6 +106,18 @@ def main():
         out = os.path.join(outdir, oid + ".mmd")
         if os.path.exists(out) and os.path.getsize(out) > 0:
             continue  # resume
+        # ---- PRE-FLIGHT PDF SANITY GATE ----
+        if pdf_sanity is not None and not _SANITY_OFF:
+            _ok, _why = pdf_sanity(pdf, deep=True, render_probe=_SANITY_RP)
+            if not _ok:
+                r = {"ok": False, "pages": 0, "chars": 0, "sec": 0.0,
+                     "repeated": False, "timed_out": False, "err": "pdf_sanity:" + str(_why)}
+                r.update({"rank": rank, "tile": local, "host": host, "osti_id": oid, "pdf": pdf, "ts": time.time()})
+                fh.write(json.dumps(r) + "\n"); done += 1
+                print(f"[r{rank:02d} t{local}] {oid[:24]:26} SANITY-SKIP {_why}", flush=True)
+                if args.max and done >= args.max:
+                    break
+                continue
         r = nougat_infer.convert(pdf, out, model=model)
         r.update({"rank": rank, "tile": local, "host": host,
                   "osti_id": oid, "pdf": pdf, "ts": time.time()})
